@@ -47,10 +47,12 @@ Cada ferramenta gera seu próprio relatório em **JSON**, que é importado indiv
 | OWASP ZAP    | `.json`          | Import via API               |
 | SonarQube    | —                | Integração direta via API    |
 
+> ℹ️ Este repositório contém apenas a **configuração do pipeline** (Jenkinsfile, Shared Library, docker-compose da infraestrutura). O código-fonte do Juice Shop **não é vendorizado** aqui — ele é obtido em tempo de execução: clonado do repositório oficial da OWASP para análise estática, e via imagem Docker oficial (`bkimminich/juice-shop`) para a análise dinâmica.
+
 ### Fluxo do pipeline
 
 ```
-1. Checkout do código-fonte do Juice Shop (workspace do Jenkins)
+1. Clone do código-fonte oficial do Juice Shop (workspace do Jenkins, em tempo de execução)
         │
 2. Secret Scanning (TruffleHog) → gera JSON
         │
@@ -96,7 +98,11 @@ Cada ferramenta gera seu próprio relatório em **JSON**, que é importado indiv
                         └─────────────────┘
 ```
 
-Todos os componentes (Juice Shop, Jenkins, SonarQube, ZAP, DefectDojo) rodam em containers Docker, comunicando-se por uma rede interna compartilhada — garantindo reprodutibilidade total do ambiente.
+A infraestrutura persistente (Jenkins, SonarQube, DefectDojo) roda em containers Docker via `docker-compose`, comunicando-se por uma rede interna compartilhada. As ferramentas de scan (TruffleHog, Trivy, ZAP) **não** ficam como serviços permanentes — são executadas sob demanda (`docker run`) pelo próprio pipeline.
+
+### Jenkins Shared Library
+
+Em vez de concentrar toda a lógica de chamada das ferramentas dentro do `Jenkinsfile`, o projeto utiliza uma **Jenkins Shared Library** — cada ferramenta é encapsulada em uma função Groovy reutilizável (ex: `trivyScan()`, `truffleHogScan()`, `zapScan()`, `defectDojoImport()`). Isso mantém o `Jenkinsfile` enxuto, legível e focado apenas na orquestração dos estágios, enquanto a lógica de execução de cada scanner fica isolada, testável e reaproveitável em outros pipelines.
 
 ---
 
@@ -116,21 +122,6 @@ Todos os componentes (Juice Shop, Jenkins, SonarQube, ZAP, DefectDojo) rodam em 
 
 ---
 
-## 🚀 Como rodar o projeto
-
-> 🚧 Seção em construção — será atualizada conforme o pipeline for implementado.
-
-```bash
-# Clonar o repositório
-git clone https://github.com/hick12/devsecops-juice-shop-pipeline.git
-cd devsecops-juice-shop-pipeline
-
-# Subir o ambiente completo
-docker-compose up -d
-```
-
----
-
 ## 📊 Vulnerabilidades encontradas
 
 > 🚧 Seção em construção — os relatórios e prints do DefectDojo serão adicionados aqui conforme as varreduras forem executadas.
@@ -141,13 +132,20 @@ docker-compose up -d
 
 ```
 .
-├── jenkins/            # Configurações e Jenkinsfile do pipeline
-├── docker-compose.yml  # Orquestração dos containers
-├── reports/            # Relatórios gerados pelas ferramentas
+├── Jenkinsfile          # Orquestração dos estágios do pipeline
+├── vars/                # Jenkins Shared Library — um .groovy por ferramenta
+│   ├── truffleHogScan.groovy
+│   ├── trivyScan.groovy
+│   ├── zapScan.groovy
+│   └── defectDojoImport.groovy
+├── docker-compose.yml   # Infraestrutura persistente (Jenkins, SonarQube, DefectDojo)
+├── reports/             # Relatórios JSON gerados pelas ferramentas (ignorado no git)
 ├── README.md
 ├── .gitignore
 └── LICENSE
 ```
+
+> ⚠️ O código-fonte do Juice Shop **não faz parte** desta estrutura — ele é obtido dinamicamente durante a execução do pipeline (ver seção de Arquitetura acima).
 
 ---
 
