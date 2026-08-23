@@ -1,0 +1,86 @@
+version: "3.8"
+
+# ─────────────────────────────────────────────────────────────
+# Infraestrutura do pipeline: Jenkins, SonarQube e Juice Shop.
+#
+# O DefectDojo NÃO faz parte deste compose — ele roda de forma
+# isolada, a partir do submodule oficial em ./defectdojo, com o
+# próprio docker-compose deles. Este arquivo apenas se conecta à
+# rede externa do DefectDojo para que o Jenkins consiga alcançar
+# a API dele pelo nome do serviço.
+#
+# Antes de subir este compose, o DefectDojo precisa já estar
+# rodando (ver instruções no README) e a rede "defectdojo_default"
+# precisa existir.
+# ─────────────────────────────────────────────────────────────
+
+services:
+
+  jenkins:
+    image: jenkins/jenkins:lts-jdk17
+    container_name: jenkins
+    restart: unless-stopped
+    ports:
+      - "8080:8080"   # Interface web do Jenkins
+      - "50000:50000" # Comunicação com agentes (se houver)
+    volumes:
+      - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock  # Permite ao Jenkins rodar containers (docker-in-docker via socket)
+    networks:
+      - pipeline_net
+      - defectdojo_net
+
+  sonarqube:
+    image: sonarqube:community
+    container_name: sonarqube
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # Interface web / API do SonarQube
+    environment:
+      - SONAR_JDBC_URL=jdbc:postgresql://sonarqube_db:5432/sonar
+      - SONAR_JDBC_USERNAME=sonar
+      - SONAR_JDBC_PASSWORD=sonar
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    depends_on:
+      - sonarqube_db
+    networks:
+      - pipeline_net
+
+  sonarqube_db:
+    image: postgres:15
+    container_name: sonarqube_db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=sonar
+      - POSTGRES_PASSWORD=sonar
+      - POSTGRES_DB=sonar
+    volumes:
+      - sonarqube_db_data:/var/lib/postgresql/data
+    networks:
+      - pipeline_net
+
+  juice-shop:
+    image: bkimminich/juice-shop
+    container_name: juice-shop
+    restart: unless-stopped
+    ports:
+      - "3000:3000"   # Aplicação alvo, atacada pelo OWASP ZAP
+    networks:
+      - pipeline_net
+
+volumes:
+  jenkins_home:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonarqube_db_data:
+
+networks:
+  pipeline_net:
+    driver: bridge
+  defectdojo_net:
+    external: true
+    name: defectdojo_default   # Nome padrão criado pelo docker-compose do DefectDojo
