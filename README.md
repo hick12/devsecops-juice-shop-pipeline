@@ -26,32 +26,49 @@ O pipeline segue duas frentes de análise, que se complementam:
 Ferramentas que **não precisam** da aplicação rodando — analisam os arquivos do repositório diretamente, montados como volume dentro dos containers.
 
 - **TruffleHog** → Secret Scanning (busca de credenciais, tokens e chaves expostas no código/histórico do git)
-- **Semgrep / SonarQube** → SAST (análise estática de vulnerabilidades no código)
-- **OWASP Dependency-Check** → SCA (vulnerabilidades em dependências de terceiros)
+- **SonarQube** → SAST (análise estática de vulnerabilidades no código)
+- **Trivy (modo `fs`)** → SCA (vulnerabilidades em dependências de terceiros, analisando o filesystem do projeto)
 
 ### 2. Análise sobre a aplicação em execução (dinâmico)
-Ferramenta que ataca a aplicação **de pé**, via HTTP, como um usuário real faria.
+Ferramentas que atuam sobre a aplicação **de pé** ou sobre a imagem já construída.
 
-- **OWASP ZAP** → DAST (varredura ativa contra o Juice Shop rodando em container)
+- **Trivy (modo `image`)** → Escaneia a imagem Docker do Juice Shop em busca de vulnerabilidades conhecidas (CVEs) em pacotes do SO e camadas da imagem
+- **OWASP ZAP** → DAST (varredura ativa via HTTP contra o Juice Shop rodando em container)
+
+### Integração com o DefectDojo
+
+Cada ferramenta gera seu próprio relatório em **JSON**, que é importado individualmente para o DefectDojo via **API** — cada uma com seu *scan type* específico. A exceção é o **SonarQube**, que se integra ao DefectDojo diretamente **via API** (sem gerar um arquivo JSON intermediário).
+
+| Ferramenta   | Saída            | Integração com DefectDojo |
+|--------------|------------------|-----------------------------|
+| TruffleHog   | `.json`          | Import via API               |
+| Trivy (fs)   | `.json`          | Import via API               |
+| Trivy (image)| `.json`          | Import via API               |
+| OWASP ZAP    | `.json`          | Import via API               |
+| SonarQube    | —                | Integração direta via API    |
 
 ### Fluxo do pipeline
 
 ```
 1. Checkout do código-fonte do Juice Shop (workspace do Jenkins)
         │
-2. Secret Scanning (TruffleHog) → sobre os arquivos do repositório
+2. Secret Scanning (TruffleHog) → gera JSON
         │
-3. SAST (Semgrep/SonarQube) → sobre os arquivos do repositório
+3. SAST (SonarQube) → resultado integrado ao DefectDojo via API
         │
-4. SCA (Dependency-Check) → sobre as dependências do projeto
+4. SCA (Trivy fs) → gera JSON, escaneia dependências do projeto
         │
-5. Sobe o Juice Shop via Docker (docker-compose up)
+5. Build da imagem Docker do Juice Shop
         │
-6. DAST (OWASP ZAP) → ataca o Juice Shop rodando
+6. Scan de imagem (Trivy image) → gera JSON, escaneia a imagem construída
         │
-7. Todos os relatórios são enviados ao DefectDojo
+7. Sobe o Juice Shop via Docker (docker-compose up)
         │
-8. DefectDojo centraliza, deduplica e apresenta as vulnerabilidades encontradas
+8. DAST (OWASP ZAP) → ataca o Juice Shop rodando, gera JSON
+        │
+9. Todos os JSONs são importados ao DefectDojo via API
+        │
+10. DefectDojo centraliza, deduplica e apresenta as vulnerabilidades encontradas
 ```
 
 ### Diagrama de componentes
@@ -62,38 +79,40 @@ Ferramenta que ataca a aplicação **de pé**, via HTTP, como um usuário real f
 │         (orquestra todas as etapas do pipeline)          │
 └──────────────┬──────────────────────────┬────────────────┘
                │                          │
-   ┌───────────▼───────────┐   ┌──────────▼───────────┐
-   │   Código-fonte         │   │  Juice Shop (container)│
-   │   (volume montado)     │   │   rodando na porta 3000│
-   │                        │   │                        │
-   │  • TruffleHog          │   │  • OWASP ZAP (DAST)    │
-   │  • Semgrep/SonarQube   │   └────────────────────────┘
-   │  • Dependency-Check    │
-   └────────────┬───────────┘
-                │
-        ┌───────▼────────┐
-        │   DefectDojo    │
-        │ (relatórios     │
-        │  centralizados) │
-        └─────────────────┘
+   ┌───────────▼───────────┐   ┌──────────▼───────────────┐
+   │   Código-fonte         │   │  Juice Shop (container /  │
+   │   (volume montado)     │   │   imagem Docker)          │
+   │                        │   │                            │
+   │  • TruffleHog          │   │  • Trivy (image)           │
+   │  • SonarQube            │   │  • OWASP ZAP (DAST)        │
+   │  • Trivy (fs)           │   └────────────┬───────────────┘
+   └────────────┬───────────┘                │
+                │         JSON via API        │
+                └───────────────┬─────────────┘
+                        ┌───────▼────────┐
+                        │   DefectDojo    │
+                        │ (relatórios     │
+                        │  centralizados) │
+                        └─────────────────┘
 ```
 
-Todos os componentes (Juice Shop, Jenkins, ZAP, DefectDojo) rodam em containers Docker, comunicando-se por uma rede interna compartilhada — garantindo reprodutibilidade total do ambiente.
+Todos os componentes (Juice Shop, Jenkins, SonarQube, ZAP, DefectDojo) rodam em containers Docker, comunicando-se por uma rede interna compartilhada — garantindo reprodutibilidade total do ambiente.
 
 ---
 
 ## 🛠️ Ferramentas utilizadas
 
-| Categoria         | Ferramenta                | Função                                          |
-|--------------------|----------------------------|--------------------------------------------------|
-| Orquestração       | Jenkins                   | Automatiza e executa o pipeline CI/CD             |
-| Secret Scanning    | TruffleHog                | Detecta credenciais e segredos expostos no código |
-| SAST               | Semgrep / SonarQube        | Analisa vulnerabilidades no código-fonte          |
-| SCA                | OWASP Dependency-Check     | Verifica vulnerabilidades em dependências         |
-| DAST               | OWASP ZAP                  | Ataca a aplicação em execução                     |
-| Gestão de vulns.   | DefectDojo                 | Centraliza, deduplica e reporta os achados        |
-| Containerização    | Docker / Docker Compose    | Isola e orquestra todos os serviços               |
-| Aplicação alvo     | OWASP Juice Shop           | Aplicação intencionalmente vulnerável             |
+| Categoria             | Ferramenta                | Função                                              |
+|------------------------|----------------------------|-------------------------------------------------------|
+| Orquestração           | Jenkins                   | Automatiza e executa o pipeline CI/CD                  |
+| Secret Scanning        | TruffleHog                | Detecta credenciais e segredos expostos no código      |
+| SAST                   | SonarQube                  | Analisa vulnerabilidades no código-fonte (integração via API) |
+| SCA                    | Trivy (modo `fs`)          | Verifica vulnerabilidades em dependências do projeto   |
+| Scan de imagem         | Trivy (modo `image`)       | Verifica CVEs na imagem Docker do Juice Shop           |
+| DAST                   | OWASP ZAP                  | Ataca a aplicação em execução                          |
+| Gestão de vulns.       | DefectDojo                 | Centraliza, deduplica e reporta os achados (import via API) |
+| Containerização        | Docker / Docker Compose    | Isola e orquestra todos os serviços                    |
+| Aplicação alvo         | OWASP Juice Shop           | Aplicação intencionalmente vulnerável                  |
 
 ---
 
