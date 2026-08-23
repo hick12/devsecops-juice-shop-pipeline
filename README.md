@@ -139,13 +139,14 @@ Em vez de concentrar toda a lógica de chamada das ferramentas dentro do `Jenkin
 │   ├── zapScan.groovy
 │   └── defectDojoImport.groovy
 ├── docker-compose.yml   # Infraestrutura persistente (Jenkins, SonarQube, DefectDojo)
-├── reports/             # Relatórios JSON gerados pelas ferramentas (ignorado no git)
 ├── README.md
 ├── .gitignore
 └── LICENSE
 ```
 
 > ⚠️ O código-fonte do Juice Shop **não faz parte** desta estrutura — ele é obtido dinamicamente durante a execução do pipeline (ver seção de Arquitetura acima).
+>
+> Os relatórios JSON de cada ferramenta são gerados **dentro do workspace do Jenkins**, a cada execução do pipeline — não ficam versionados neste repositório. Se for necessário preservá-los entre builds, isso é feito via `archiveArtifacts` do próprio Jenkins, não via commit no Git.
 
 ---
 
